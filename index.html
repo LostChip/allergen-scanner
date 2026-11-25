@@ -106,6 +106,9 @@ footer{color:var(--muted);font-size:.8rem;text-align:center}
 .tile .w{font-size:.85rem;font-weight:700}
 .tile.v-bad .w{color:var(--bad)} .tile.v-warn .w{color:var(--warn)} .tile.v-good .w{color:var(--good)} .tile.v-unk .w{color:var(--unk)}
 .tile.v-good{border-color:var(--line);background:var(--surface)}
+.source{font-size:.8rem !important}
+a.fallback{display:block;text-align:center;background:var(--accent);color:var(--accent-fg);border-radius:10px;padding:12px;font-weight:700;text-decoration:none}
+#sourcesPanel summary::after{content:"More"} #sourcesPanel[open] summary::after{content:"Close"}
 </style>
 </head>
 <body>
@@ -115,7 +118,7 @@ footer{color:var(--muted);font-size:.8rem;text-align:center}
       <div class="eyebrow">Barcode check</div>
       <h1>Allergen Scanner</h1>
     </div>
-    <p>Data from Open Food Facts</p>
+    <p>Open Food Facts + USDA</p>
   </header>
 
   <section class="panel" aria-labelledby="scan-h">
@@ -144,6 +147,18 @@ footer{color:var(--muted);font-size:.8rem;text-align:center}
     <p class="hint">The nine major allergens are on by default. Gluten covers wheat, barley, rye, oats, spelt and malt. Your picks are saved on this device.</p>
   </details>
 
+  <details class="panel" id="sourcesPanel">
+    <summary><span><span class="eyebrow">Data sources</span></span></summary>
+    <p class="hint">Each barcode is checked on Open Food Facts first. If it isn't there, or has no ingredients, the app checks USDA FoodData Central, which covers most US packaged foods, and reads the allergens from its ingredient list.</p>
+    <p class="hint">USDA lookups use a shared demo key that allows about 30 lookups an hour. For more, get a free key at <a href="https://fdc.nal.usda.gov/api-key-signup" target="_blank" rel="noopener">fdc.nal.usda.gov</a> and paste it here. It stays on this device.</p>
+    <form class="manual" id="keyForm" autocomplete="off">
+      <label for="usdaKey" hidden>USDA API key</label>
+      <input id="usdaKey" placeholder="USDA API key (optional)" spellcheck="false">
+      <button type="submit">Save</button>
+    </form>
+    <p class="status" id="keyStatus" role="status"></p>
+  </details>
+
   <section id="result" aria-live="polite"></section>
 
   <section class="panel" id="historyPanel" hidden>
@@ -151,7 +166,7 @@ footer{color:var(--muted);font-size:.8rem;text-align:center}
     <div class="history" id="history"></div>
   </section>
 
-  <footer>Product data is crowd-sourced by Open Food Facts and can be incomplete or out of date. Always check the package label before eating.</footer>
+  <footer>Product data comes from Open Food Facts and USDA FoodData Central and can be incomplete or out of date. Always check the package label before eating.</footer>
 </main>
 
 <script>
@@ -298,6 +313,41 @@ function onCode(code){
   lookup(code);
 }
 
+/* ---------- Allergens from ingredient text ---------- */
+const TEXT_WORDS = {
+  milk:["milk","cream","butter","buttermilk","cheese","whey","casein","caseinate","lactose","yogurt","yoghurt","ghee","curd","kefir","lactalbumin","milkfat","milk fat"],
+  eggs:["egg","albumin","albumen","ovalbumin","lysozyme","mayonnaise","meringue"],
+  peanuts:["peanut","groundnut","arachis"],
+  nuts:["almond","hazelnut","walnut","cashew","pecan","pistachio","brazil nut","macadamia","pine nut","filbert","praline","marzipan","nut"],
+  soybeans:["soy","soya","soybean","edamame","tofu","miso","tempeh"],
+  sesame:["sesame","tahini"],
+  fish:["fish","anchovy","anchovies","salmon","tuna","cod","pollock","tilapia","sardine","haddock","trout","mackerel","halibut"],
+  crustaceans:["shrimp","prawn","crab","lobster","crayfish","krill","langoustine","shellfish"],
+  molluscs:["clam","mussel","oyster","scallop","squid","octopus","calamari","abalone"],
+  celery:["celery","celeriac"],
+  mustard:["mustard"],
+  lupin:["lupin","lupine"],
+  sulphites:["sulfite","sulphite","metabisulfite","metabisulphite","bisulfite","sulfur dioxide","sulphur dioxide"]
+};
+// Phrases that look like an allergen word but aren't one.
+const NOT_ALLERGEN = /\b(cocoa butter|shea butter|mango butter|coconut (milk|cream)|cream of tartar|nutmeg|butternut|coconut|doughnut|donut|nutrition|nutrient|nutritional|water chestnut|milkweed|egg ?plant|buckwheat)\b|\b(milk|nut|peanut|egg|soy|dairy|fish|shellfish|sesame|mustard|celery|wheat|gluten)[- ]?free\b|\bnon[- ]?dairy\b/g;
+const TRACE_RE = /(may (also )?contain|may be present|traces? of|(made|manufactured|processed|produced|packaged|packed) (in|on)|shares? (equipment|a facility|facilities)|shared (equipment|facility|line)|same (equipment|facility|line))[^.;]*[.;]?/gi;
+function wordRe(w){ return new RegExp("\\b" + w.replace(/ /g, "\\s+") + "(e?s)?\\b", "i"); }
+function textAllergens(text){
+  let lower = String(text || "").toLowerCase();
+  lower = lower.replace(/\b(peanut|almond|cashew|hazelnut|nut|seed|apple|sunflower|soy|sesame) butter\b/g, "$1");
+  const traceParts = (lower.match(TRACE_RE) || []).join(" ").replace(NOT_ALLERGEN, " ");
+  const mainPart = lower.replace(TRACE_RE, " ").replace(NOT_ALLERGEN, " ");
+  const contains = new Set(), traces = new Set();
+  Object.keys(TEXT_WORDS).forEach(id => {
+    if (TEXT_WORDS[id].some(w => wordRe(w).test(mainPart))) contains.add(id);
+    else if (TEXT_WORDS[id].some(w => wordRe(w).test(traceParts))) traces.add(id);
+  });
+  const g = GLUTEN_WORDS.filter(w => wordRe(w.replace(/'/g, "'?")).test(traceParts));
+  if (g.length) traces.add("gluten");
+  return {contains, traces, mainPart};
+}
+
 /* ---------- Lookup ---------- */
 const FIELDS = "code,product_name,product_name_en,generic_name,brands,quantity,image_front_small_url,allergens_tags,traces_tags,ingredients_text,ingredients_text_en,labels_tags,ingredients_tags,lang";
 let current = null;
@@ -308,7 +358,7 @@ async function lookup(raw){
   const res = $("result"); res.textContent = "";
   const p = document.createElement("div"); p.className = "panel"; p.innerHTML = '<p class="status"><span class="spinner"></span>Looking up ' + code + '…</p>';
   res.append(p);
-  let data = null;
+  let data = null, offFailed = false;
   // Try as typed, then with a leading 0 (UPC-A -> EAN-13), then without one.
   const tries = [code];
   if (code.length === 12) tries.push("0" + code);
@@ -320,14 +370,63 @@ async function lookup(raw){
       const j = await r.json();
       if (j && j.status === 1 && j.product){ data = j.product; data.code = data.code || c; break; }
     }
-  }catch(e){
-    renderError(code, "Couldn't reach Open Food Facts. Check your connection and try again.");
+  }catch(e){ offFailed = true; }
+
+  const offUseful = data && ((data.allergens_tags || []).length || (data.traces_tags || []).length || (data.ingredients_text_en || data.ingredients_text || "").trim());
+  let usda = null, usdaError = "";
+  if (!offUseful){
+    try{ usda = await usdaLookup(code); }
+    catch(e){ usdaError = e && e.message === "rate" ? "rate" : "fail"; }
+  }
+  if (usda){
+    // Keep Open Food Facts' name and photo when it has them; take ingredients from USDA.
+    const merged = Object.assign({}, data || {}, {
+      code: (data && data.code) || code,
+      product_name: (data && (data.product_name_en || data.product_name)) || usda.name,
+      brands: (data && data.brands) || usda.brand,
+      quantity: (data && data.quantity) || usda.size,
+      ingredients_text: usda.ingredients, ingredients_text_en: usda.ingredients,
+      allergens_tags: [], traces_tags: [], _source: "usda", _offHas: !!data
+    });
+    data = merged;
+  }
+  if (!data){
+    if (offFailed && usdaError === "fail") renderError(code, "Couldn't reach the product databases. Check your connection and try again.");
+    else renderNotFound(code, usdaError);
     return;
   }
-  if (!data){ renderNotFound(code); return; }
   current = analyse(data);
   renderResult(current);
   remember(current);
+}
+
+function usdaKey(){ return (load("usdaKey", "") || "").trim() || "DEMO_KEY"; }
+function stripZeros(s){ return String(s || "").replace(/\D/g, "").replace(/^0+/, ""); }
+async function usdaLookup(code){
+  const want = stripZeros(code);
+  const queries = [code]; if (want !== code) queries.push(want);
+  for (const q of queries){
+    const url = "https://api.nal.usda.gov/fdc/v1/foods/search?api_key=" + encodeURIComponent(usdaKey()) +
+      "&dataType=Branded&pageSize=10&query=" + encodeURIComponent(q);
+    const r = await fetch(url);
+    if (r.status === 429) throw new Error("rate");
+    if (r.status === 403) throw new Error("rate");
+    if (!r.ok) throw new Error("http");
+    const j = await r.json();
+    const hit = (j.foods || []).filter(f => stripZeros(f.gtinUpc) === want)
+      .sort((x, y) => String(y.publishedDate || "").localeCompare(String(x.publishedDate || "")))
+      .find(f => f.ingredients) || (j.foods || []).find(f => stripZeros(f.gtinUpc) === want);
+    if (hit){
+      const title = s => String(s || "").toLowerCase().replace(/\b[a-z]/g, c => c.toUpperCase());
+      return {
+        name: title(hit.description) || "Unnamed product",
+        brand: title(hit.brandName || hit.brandOwner || ""),
+        size: hit.packageWeight || (hit.servingSize ? "" : ""),
+        ingredients: (hit.ingredients || "").trim()
+      };
+    }
+  }
+  return null;
 }
 
 /* ---------- Analysis ---------- */
@@ -344,16 +443,24 @@ function analyse(p){
   const glutenWords = GLUTEN_WORDS.filter(w => new RegExp("\\b" + w.replace(/'/g, "'?") + "\\b", "i").test(lower));
   const gfLabel = labels.some(l => GLUTEN_FREE_LABELS.includes(l));
   const hasData = allergenTags.length > 0 || traceTags.length > 0 || ingredients.length > 0;
+  // Also read allergens straight from the ingredient text, which catches gaps in the database's allergen list.
+  const fromText = textAllergens(ingredients);
+  fromText.contains.forEach(id => { if (!contains.has(id)) { contains.add(id); traces.delete(id); } });
+  fromText.traces.forEach(id => { if (!contains.has(id)) traces.add(id); });
+  if (glutenWords.some(w => !/^oats?$/.test(w)) && !gfLabel){ contains.add("gluten"); traces.delete("gluten"); }
+  const source = p._source === "usda" ? "USDA FoodData Central" : "Open Food Facts";
   return {
     code: p.code, name: p.product_name_en || p.product_name || p.generic_name || "Unnamed product",
     brand: (p.brands || "").split(",")[0].trim(), quantity: p.quantity || "", image: p.image_front_small_url || "",
     contains, traces, otherContains, otherTraces, ingredients, glutenWords, gfLabel, hasData,
-    hasAllergenInfo: allergenTags.length > 0 || traceTags.length > 0
+    hasAllergenInfo: allergenTags.length > 0 || traceTags.length > 0 || ingredients.length > 0,
+    source, offHas: p._source === "usda" ? !!p._offHas : true
   };
 }
 
 function glutenVerdict(a){
-  if (a.contains.has("gluten")) return {cls:"v-bad", big:"Contains gluten", why:"Listed as an allergen on this product."};
+  if (a.contains.has("gluten")) return {cls:"v-bad", big:"Contains gluten", why: a.glutenWords.length ? "The ingredients include " + a.glutenWords.join(", ") + "." : "Listed as an allergen on this product."};
+  if (a.glutenWords.some(w => !/^oats?$/.test(w)) && !a.gfLabel) return {cls:"v-bad", big:"Contains gluten", why:"The ingredients include " + a.glutenWords.join(", ") + "."};
   if (a.glutenWords.length && !a.gfLabel) return {cls:"v-bad", big:"Likely contains gluten", why:"The ingredients mention " + a.glutenWords.join(", ") + "."};
   if (a.traces.has("gluten")) return {cls:"v-warn", big:"May contain gluten", why:"Listed as a possible trace or cross-contact."};
   if (a.gfLabel && a.glutenWords.length) return {cls:"v-warn", big:"Labelled gluten-free, check oats", why:"Labelled gluten-free, but the ingredients mention " + a.glutenWords.join(", ") + "."};
@@ -380,7 +487,7 @@ function allergenStatus(a, id){
   if (!a.hasData) return {cls:"v-unk", word:"No data"};
   if (id === "gluten"){
     const g = glutenVerdict(a);
-    if (g.cls === "v-bad") return {cls:"v-bad", word: a.contains.has("gluten") ? "Contains" : "Likely"};
+    if (g.cls === "v-bad") return {cls:"v-bad", word: (a.contains.has("gluten") || a.glutenWords.some(w => !/^oats?$/.test(w))) ? "Contains" : "Likely"};
     if (g.cls === "v-warn") return {cls:"v-warn", word: a.traces.has("gluten") ? "May contain" : "Check oats"};
     if (g.cls === "v-good") return {cls:"v-good", word: a.gfLabel ? "Gluten-free label" : "Not listed"};
     return {cls:"v-unk", word:"No data"};
@@ -438,6 +545,7 @@ function renderResult(a){
   const sub = [a.brand, a.quantity].filter(Boolean).join(" · ");
   if (sub) meta.append(el("p", null, sub));
   meta.append(el("p", "code", "Barcode " + a.code));
+  meta.append(el("p", "source", "Source: " + a.source + (a.source !== "Open Food Facts" ? " (allergens read from the ingredients)" : "")));
   prod.append(meta);
   panel.append(prod);
 
@@ -471,30 +579,47 @@ function renderResult(a){
   } else sec3.append(el("p", "none", "No ingredient list recorded."));
   panel.append(sec3);
 
-  if (!a.hasAllergenInfo || !a.ingredients){
+  if (!a.ingredients){
     const n = el("p", "note");
-    n.append(document.createTextNode("Some data is missing for this product, so check the package label. You can help by adding it on "));
-    const link = el("a", null, "Open Food Facts"); link.href = "https://world.openfoodfacts.org/product/" + encodeURIComponent(a.code); link.target = "_blank"; link.rel = "noopener";
-    n.append(link, document.createTextNode("."));
+    n.append(document.createTextNode("Neither database has this product's ingredients, so check the package label. Snap a photo of the label to have Claude read it."));
     panel.append(n);
+    panel.append(labelCheckLink());
   }
 
-  const more = el("p", "hint");
-  const l2 = el("a", null, "View this product on Open Food Facts"); l2.href = "https://world.openfoodfacts.org/product/" + encodeURIComponent(a.code); l2.target = "_blank"; l2.rel = "noopener";
-  more.append(l2); panel.append(more);
+  if (a.offHas){
+    const more = el("p", "hint");
+    const l2 = el("a", null, "View this product on Open Food Facts"); l2.href = "https://world.openfoodfacts.org/product/" + encodeURIComponent(a.code); l2.target = "_blank"; l2.rel = "noopener";
+    more.append(l2); panel.append(more);
+  }
 
   res.append(panel);
   res.scrollIntoView({behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start"});
 }
 
-function renderNotFound(code){
+const LABEL_CHECK_URL = "https://claude.ai/artifact/CPjesKaT79FzqRaqJeM1Hm";
+function labelCheckLink(){
+  const a = el("a", "fallback", "Photograph the label instead");
+  a.href = LABEL_CHECK_URL; a.target = "_blank"; a.rel = "noopener";
+  return a;
+}
+function renderNotFound(code, usdaError){
   const res = $("result"); res.textContent = "";
   const panel = el("div", "panel");
-  panel.append(verdictBox({cls:"v-unk", big:"Product not found", why:"Open Food Facts has no product with barcode " + code + "."}));
-  const n = el("p", "note");
-  n.append(document.createTextNode("Check the number and try again, or read the package label. Anyone can add a product with the Open Food Facts app or at "));
-  const a = el("a", null, "openfoodfacts.org"); a.href = "https://world.openfoodfacts.org/"; a.target = "_blank"; a.rel = "noopener";
-  n.append(a, document.createTextNode("."));
+  const checked = usdaError ? "Open Food Facts has no product with barcode " + code + "." : "Neither Open Food Facts nor USDA FoodData Central has barcode " + code + ".";
+  panel.append(verdictBox({cls:"v-unk", big:"Product not found", why: checked}));
+  if (usdaError === "rate"){
+    const w = el("p", "note");
+    w.textContent = "The USDA cross-check hit its hourly limit, so it was skipped. Add your own free key under Data sources to lift the limit.";
+    panel.append(w);
+  } else if (usdaError){
+    panel.append(el("p", "note", "The USDA cross-check couldn't be reached, so it was skipped."));
+  }
+  panel.append(el("p", "hint", "Double-check the number, or snap the ingredients label and Claude will read the allergens from it."));
+  panel.append(labelCheckLink());
+  const n = el("p", "hint");
+  n.append(document.createTextNode("You can also add the product to "));
+  const a = el("a", null, "Open Food Facts"); a.href = "https://world.openfoodfacts.org/"; a.target = "_blank"; a.rel = "noopener";
+  n.append(a, document.createTextNode(" so it's found next time."));
   panel.append(n); res.append(panel);
 }
 function renderError(code, msg){
@@ -531,6 +656,11 @@ $("stopBtn").addEventListener("click", () => { stopScan(); setStatus(""); });
 $("manualForm").addEventListener("submit", (e) => { e.preventDefault(); stopScan(); lookup($("codeInput").value); });
 document.addEventListener("visibilitychange", () => { if (document.hidden) stopScan(); });
 renderChips(); renderHistory();
+$("usdaKey").value = load("usdaKey", "") || "";
+$("keyForm").addEventListener("submit", (e) => {
+  e.preventDefault(); const v = $("usdaKey").value.trim(); save("usdaKey", v);
+  $("keyStatus").textContent = v ? "Saved. USDA lookups now use your key." : "Cleared. Using the shared demo key.";
+});
 const q = new URLSearchParams(location.search).get("code");
 if (q) { $("codeInput").value = q; lookup(q); }
 })();
