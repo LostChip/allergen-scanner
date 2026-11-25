@@ -151,7 +151,7 @@ a.fallback{display:block;text-align:center;background:var(--accent);color:var(--
   <details class="panel" id="sourcesPanel">
     <summary><span><span class="eyebrow">Data sources</span></span></summary>
     <p class="hint">Every barcode is checked on Open Food Facts and USDA FoodData Central at the same time. Allergens from both are combined, so if either one flags an allergen, you see it. USDA covers most US packaged foods; its allergens are read from the ingredient list.</p>
-    <p class="hint">USDA lookups use a shared demo key that allows about 30 lookups an hour, and every scan uses one or two. For more, get a free key at <a href="https://fdc.nal.usda.gov/api-key-signup" target="_blank" rel="noopener">fdc.nal.usda.gov</a> and paste it here. It stays on this device.</p>
+    <p class="hint">USDA lookups use the app's built-in key, which allows about 1,000 lookups an hour. To use a different key from <a href="https://fdc.nal.usda.gov/api-key-signup" target="_blank" rel="noopener">fdc.nal.usda.gov</a>, paste it here. It stays on this device.</p>
     <form class="manual" id="keyForm" autocomplete="off">
       <label for="usdaKey" hidden>USDA API key</label>
       <input id="usdaKey" placeholder="USDA API key (optional)" spellcheck="false">
@@ -394,7 +394,9 @@ async function lookup(raw){
   remember(current);
 }
 
-function usdaKey(){ return (load("usdaKey", "") || "").trim() || "DEMO_KEY"; }
+// Built-in free USDA key (api.data.gov). A key saved under Data sources overrides it.
+const BUILT_IN_USDA_KEY = "jjqqfhzDbC7qChgmpmtcF6jJdpRzfQBQtbFBncD9";
+function usdaKey(){ return (load("usdaKey", "") || "").trim() || BUILT_IN_USDA_KEY; }
 function stripZeros(s){ return String(s || "").replace(/\D/g, "").replace(/^0+/, ""); }
 async function usdaLookup(code){
   const want = stripZeros(code);
@@ -653,7 +655,7 @@ function renderNotFound(code, usdaError, offFailed){
   panel.append(verdictBox({cls:"v-unk", big:"Product not found", why: checked}));
   if (usdaError === "rate"){
     const w = el("p", "note");
-    w.textContent = "The USDA cross-check hit its hourly limit, so it was skipped. Add your own free key under Data sources to lift the limit.";
+    w.textContent = "The USDA cross-check hit its hourly limit, so it was skipped. Try again in a few minutes.";
     panel.append(w);
   } else if (usdaError){
     panel.append(el("p", "note", "The USDA cross-check couldn't be reached, so it was skipped."));
@@ -703,7 +705,7 @@ renderChips(); renderHistory();
 $("usdaKey").value = load("usdaKey", "") || "";
 $("keyForm").addEventListener("submit", (e) => {
   e.preventDefault(); const v = $("usdaKey").value.trim(); save("usdaKey", v);
-  $("keyStatus").textContent = v ? "Saved. USDA lookups now use your key." : "Cleared. Using the shared demo key.";
+  $("keyStatus").textContent = v ? "Saved. USDA lookups now use your key." : "Cleared. Using the built-in key.";
 });
 const q = new URLSearchParams(location.search).get("code");
 if (q) { $("codeInput").value = q; lookup(q); }
