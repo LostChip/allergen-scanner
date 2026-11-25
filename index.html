@@ -240,8 +240,33 @@ let stream = null, scanning = false, zxingControls = null, rafId = 0;
 
 function setStatus(msg, isErr){ const s = $("scanStatus"); s.textContent = msg || ""; s.className = "status" + (isErr ? " err" : ""); }
 
+/* Inside the iOS app, use the phone's native scanner (faster, works in low light, has a torch). */
+function nativeScanner(){
+  const C = window.Capacitor;
+  return (C && C.isNativePlatform && C.isNativePlatform() && C.Plugins && C.Plugins.CapacitorBarcodeScanner) || null;
+}
+async function startNativeScan(plugin){
+  setStatus("Opening scanner…");
+  try{
+    const res = await plugin.scanBarcode({
+      hint: 17, scanInstructions: "Line up the barcode inside the frame",
+      scanButton: false, scanText: "", cameraDirection: 1, scanOrientation: 1
+    });
+    const code = String(res && res.ScanResult || "").trim();
+    if (/^\d{6,14}$/.test(code)) onCode(code);
+    else setStatus(code ? "That doesn't look like a product barcode. Try again or type the number below." : "", !!code);
+  }catch(e){
+    const c = e && e.code || "";
+    if (c.endsWith("0006")) setStatus("");
+    else if (c.endsWith("0007")) setStatus("Camera access is off. Turn it on in Settings > Allergen Scanner > Camera, or type the number below.", true);
+    else setStatus("Couldn't scan that. Try again or type the barcode number below.", true);
+  }
+}
+
 async function startScan(){
   if (scanning) return;
+  const plugin = nativeScanner();
+  if (plugin) return startNativeScan(plugin);
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
     setStatus("This browser can't open the camera here. Type the barcode number below instead.", true); return;
   }
@@ -309,6 +334,7 @@ function stopScan(){
 function onCode(code){
   stopScan();
   if (navigator.vibrate) { try{ navigator.vibrate(60); }catch(e){} }
+  try{ const H = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.Haptics; if (H) H.notification({type:"SUCCESS"}); }catch(e){}
   setStatus("Found " + code);
   $("codeInput").value = code;
   lookup(code);
