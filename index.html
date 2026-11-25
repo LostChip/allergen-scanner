@@ -1,0 +1,539 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0f5a4a">
+<title>Allergen Scanner</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Space+Grotesk:wght@500;700&display=swap">
+<style>
+/* Layout: one narrow column, scanner on top, verdict card first, details below. */
+:root{
+  --bg:#f5f7f6; --surface:#ffffff; --fg:#14201c; --muted:#5b6b65; --line:#d9e1de;
+  --accent:#0f5a4a; --accent-fg:#ffffff; --accent-soft:#e2efeb;
+  --bad:#b3261e; --bad-soft:#fbe6e4; --warn:#8a5a00; --warn-soft:#fdf0d5;
+  --good:#1d6b34; --good-soft:#e1f2e5; --unk:#4a5560; --unk-soft:#e8ecef;
+  --display:"Space Grotesk",system-ui,sans-serif;
+  --body:"Atkinson Hyperlegible",system-ui,-apple-system,"Segoe UI",sans-serif;
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#0e1513; --surface:#16201d; --fg:#e6eeeb; --muted:#9aaba4; --line:#2a3733;
+  --accent:#5cc8a8; --accent-fg:#06201a; --accent-soft:#183a31;
+  --bad:#ff8a80; --bad-soft:#3a1a18; --warn:#f3c460; --warn-soft:#3a2e12;
+  --good:#7fd69a; --good-soft:#15301e; --unk:#b4c0c8; --unk-soft:#232c31; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0e1513; --surface:#16201d; --fg:#e6eeeb; --muted:#9aaba4; --line:#2a3733;
+  --accent:#5cc8a8; --accent-fg:#06201a; --accent-soft:#183a31;
+  --bad:#ff8a80; --bad-soft:#3a1a18; --warn:#f3c460; --warn-soft:#3a2e12;
+  --good:#7fd69a; --good-soft:#15301e; --unk:#b4c0c8; --unk-soft:#232c31; color-scheme:dark}
+*{box-sizing:border-box}
+html,body{margin:0}
+:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+body{background:var(--bg);color:var(--fg);font:16px/1.5 var(--body);-webkit-text-size-adjust:100%}
+main{max-width:560px;margin:0 auto;padding-block:16px 40px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));display:flex;flex-direction:column;gap:16px}
+h1,h2,h3{font-family:var(--display);margin:0;text-wrap:balance;line-height:1.2}
+h1{font-size:1.5rem}
+h2{font-size:1.05rem}
+.eyebrow{font-size:.75rem;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:700}
+header{display:flex;align-items:baseline;justify-content:space-between;gap:12px;flex-wrap:wrap}
+header p{margin:0;color:var(--muted);font-size:.9rem}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px;display:flex;flex-direction:column;gap:12px;min-width:0}
+button,input{font:inherit}
+button{cursor:pointer;border-radius:10px;border:1px solid var(--line);background:var(--surface);color:var(--fg);padding:10px 14px;font-weight:700}
+button.primary{background:var(--accent);color:var(--accent-fg);border-color:var(--accent);font-size:1.05rem;padding:14px 16px}
+button:focus-visible,input:focus-visible,.chip:focus-within{outline:3px solid var(--accent);outline-offset:2px}
+button[disabled]{opacity:.6;cursor:default}
+.viewfinder{position:relative;border-radius:12px;overflow:hidden;background:#000;aspect-ratio:4/3;max-width:100%}
+.viewfinder video{width:100%;height:100%;object-fit:cover;display:block}
+.viewfinder .guide{position:absolute;left:10%;right:10%;top:32%;bottom:32%;border:3px solid rgba(255,255,255,.85);border-radius:10px;box-shadow:0 0 0 999px rgba(0,0,0,.35)}
+.viewfinder .laser{position:absolute;left:12%;right:12%;top:50%;height:2px;background:#ff5a4f;box-shadow:0 0 8px #ff5a4f;animation:sweep 1.6s ease-in-out infinite alternate}
+@keyframes sweep{from{transform:translateY(-28px)}to{transform:translateY(28px)}}
+@media (prefers-reduced-motion:reduce){.viewfinder .laser{animation:none}}
+.row{display:flex;gap:8px;flex-wrap:wrap}
+.row > *{flex:1 1 auto}
+form.manual{display:flex;gap:8px}
+form.manual input{flex:1;min-width:0;padding:12px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--fg);font-variant-numeric:tabular-nums;letter-spacing:.04em}
+.hint{color:var(--muted);font-size:.85rem;margin:0}
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chip{position:relative;display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);border-radius:999px;padding:6px 12px;font-size:.9rem;cursor:pointer;user-select:none;background:var(--surface)}
+.chip input{position:absolute;opacity:0;pointer-events:none}
+.chip:has(input:checked){background:var(--accent-soft);border-color:var(--accent);color:var(--fg);font-weight:700}
+.chip:has(input:checked)::before{content:"✓";color:var(--accent)}
+details.panel summary{cursor:pointer;list-style:none;display:flex;justify-content:space-between;align-items:center;gap:8px}
+details.panel summary::-webkit-details-marker{display:none}
+details.panel summary::after{content:"Edit";color:var(--accent);font-weight:700;font-size:.9rem}
+details[open].panel summary::after{content:"Done"}
+.watching{color:var(--muted);font-size:.9rem;margin:0}
+/* Result */
+.product{display:flex;gap:12px;align-items:flex-start}
+.product img{width:72px;height:72px;object-fit:contain;border-radius:8px;background:#fff;border:1px solid var(--line);flex:none}
+.product .meta{min-width:0}
+.product .meta p{margin:2px 0 0;color:var(--muted);font-size:.9rem;overflow-wrap:anywhere}
+.code{font-variant-numeric:tabular-nums;letter-spacing:.03em}
+.verdict{border-radius:12px;padding:14px 16px;display:flex;flex-direction:column;gap:4px;border:2px solid}
+.verdict .big{font-family:var(--display);font-size:1.35rem;font-weight:700;line-height:1.2}
+.verdict p{margin:0}
+.v-bad{background:var(--bad-soft);border-color:var(--bad);color:var(--fg)} .v-bad .big{color:var(--bad)}
+.v-warn{background:var(--warn-soft);border-color:var(--warn)} .v-warn .big{color:var(--warn)}
+.v-good{background:var(--good-soft);border-color:var(--good)} .v-good .big{color:var(--good)}
+.v-unk{background:var(--unk-soft);border-color:var(--unk)} .v-unk .big{color:var(--unk)}
+.list{display:flex;flex-direction:column;gap:6px;margin:0;padding:0;list-style:none}
+.tags{display:flex;flex-wrap:wrap;gap:6px}
+.tag{border-radius:999px;padding:3px 10px;font-size:.88rem;border:1px solid var(--line);background:var(--bg)}
+.tag.hit{background:var(--bad-soft);border-color:var(--bad);color:var(--bad);font-weight:700}
+.tag.hit-warn{background:var(--warn-soft);border-color:var(--warn);color:var(--warn);font-weight:700}
+.none{color:var(--muted);font-style:italic;margin:0}
+.ingredients{margin:0;font-size:.95rem;overflow-wrap:anywhere}
+.ingredients mark{background:var(--bad-soft);color:var(--bad);font-weight:700;border-radius:3px;padding:0 2px}
+.note{border-left:4px solid var(--warn);background:var(--warn-soft);padding:10px 12px;border-radius:6px;font-size:.92rem;margin:0}
+a{color:var(--accent)}
+.history{display:flex;flex-direction:column;gap:0}
+.history button{display:flex;justify-content:space-between;gap:12px;text-align:left;border:0;border-top:1px solid var(--line);border-radius:0;padding:10px 2px;font-weight:400;background:none}
+.history button:first-child{border-top:0}
+.history .h-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dot{flex:none;font-size:.8rem;font-weight:700;border-radius:999px;padding:1px 8px}
+.dot.v-bad{color:var(--bad)} .dot.v-warn{color:var(--warn)} .dot.v-good{color:var(--good)} .dot.v-unk{color:var(--unk)}
+.status{margin:0;font-size:.92rem;color:var(--muted)}
+.status.err{color:var(--bad)}
+footer{color:var(--muted);font-size:.8rem;text-align:center}
+.spinner{width:18px;height:18px;border:3px solid var(--line);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite;display:inline-block;vertical-align:middle;margin-right:8px}
+@keyframes spin{to{transform:rotate(360deg)}}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px}
+.tile{border-width:1px;border-style:solid;border-radius:10px;padding:8px 12px;display:flex;flex-direction:column;gap:2px;min-width:0}
+.tile .n{font-weight:700}
+.tile .w{font-size:.85rem;font-weight:700}
+.tile.v-bad .w{color:var(--bad)} .tile.v-warn .w{color:var(--warn)} .tile.v-good .w{color:var(--good)} .tile.v-unk .w{color:var(--unk)}
+.tile.v-good{border-color:var(--line);background:var(--surface)}
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <div>
+      <div class="eyebrow">Barcode check</div>
+      <h1>Allergen Scanner</h1>
+    </div>
+    <p>Data from Open Food Facts</p>
+  </header>
+
+  <section class="panel" aria-labelledby="scan-h">
+    <h2 id="scan-h" class="sr-only" hidden>Scan</h2>
+    <div class="viewfinder" id="viewfinder" hidden>
+      <video id="video" playsinline muted></video>
+      <div class="guide"></div>
+      <div class="laser"></div>
+    </div>
+    <div class="row">
+      <button class="primary" id="scanBtn" type="button">Scan a barcode</button>
+      <button id="stopBtn" type="button" hidden>Stop camera</button>
+    </div>
+    <p class="status" id="scanStatus" role="status"></p>
+    <form class="manual" id="manualForm" autocomplete="off">
+      <label for="codeInput" hidden>Barcode number</label>
+      <input id="codeInput" inputmode="numeric" pattern="[0-9]*" placeholder="Or type the barcode number" maxlength="14">
+      <button type="submit">Look up</button>
+    </form>
+  </section>
+
+  <details class="panel" id="watchPanel">
+    <summary><span><span class="eyebrow">Watching for</span></span></summary>
+    <p class="watching" id="watchSummary"></p>
+    <div class="chips" id="chips"></div>
+    <p class="hint">The nine major allergens are on by default. Gluten covers wheat, barley, rye, oats, spelt and malt. Your picks are saved on this device.</p>
+  </details>
+
+  <section id="result" aria-live="polite"></section>
+
+  <section class="panel" id="historyPanel" hidden>
+    <div class="eyebrow">Recent scans</div>
+    <div class="history" id="history"></div>
+  </section>
+
+  <footer>Product data is crowd-sourced by Open Food Facts and can be incomplete or out of date. Always check the package label before eating.</footer>
+</main>
+
+<script>
+(function(){
+"use strict";
+const $ = (id) => document.getElementById(id);
+
+/* ---------- Allergen catalogue (Open Food Facts tag ids) ---------- */
+const ALLERGENS = [
+  {id:"gluten", label:"Gluten", tags:["en:gluten","en:wheat","en:barley","en:rye","en:oats","en:spelt","en:kamut"]},
+  {id:"milk", label:"Milk", tags:["en:milk","en:lactose"]},
+  {id:"eggs", label:"Eggs", tags:["en:eggs"]},
+  {id:"peanuts", label:"Peanuts", tags:["en:peanuts"]},
+  {id:"nuts", label:"Tree nuts", tags:["en:nuts","en:almonds","en:hazelnuts","en:walnuts","en:cashew-nuts","en:pecan-nuts","en:pistachio-nuts","en:brazil-nuts","en:macadamia-nuts"]},
+  {id:"soybeans", label:"Soy", tags:["en:soybeans","en:soy"]},
+  {id:"sesame", label:"Sesame", tags:["en:sesame-seeds","en:sesame"]},
+  {id:"fish", label:"Fish", tags:["en:fish"]},
+  {id:"crustaceans", label:"Shellfish", tags:["en:crustaceans"]},
+  {id:"molluscs", label:"Molluscs", tags:["en:molluscs"]},
+  {id:"celery", label:"Celery", tags:["en:celery"]},
+  {id:"mustard", label:"Mustard", tags:["en:mustard"]},
+  {id:"lupin", label:"Lupin", tags:["en:lupin"]},
+  {id:"sulphites", label:"Sulphites", tags:["en:sulphur-dioxide-and-sulphites"]}
+];
+const TAG_TO_ALLERGEN = {};
+ALLERGENS.forEach(a => a.tags.forEach(t => TAG_TO_ALLERGEN[t] = a.id));
+const LABEL = Object.fromEntries(ALLERGENS.map(a => [a.id, a.label]));
+
+/* Words in ingredient text that point to gluten. Oats included because most are cross-contaminated. */
+const GLUTEN_WORDS = ["wheat","barley","rye","malt","spelt","triticale","semolina","durum","farro","kamut","einkorn","emmer","bulgur","couscous","seitan","brewer's yeast","brewers yeast","graham","farina","oat","oats","gluten"];
+const GLUTEN_FREE_LABELS = ["en:gluten-free","en:no-gluten","en:certified-gluten-free","en:gluten-free-certified-by-gfco","en:crossed-grain-symbol"];
+
+/* ---------- Storage (per device; tolerant of blocked storage) ---------- */
+function load(key, fallback){ try{ const v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; }catch(e){ return fallback; } }
+function save(key, value){ try{ localStorage.setItem(key, JSON.stringify(value)); }catch(e){} }
+
+let watch = new Set(load("watch2", ["gluten","milk","eggs","peanuts","nuts","soybeans","sesame","fish","crustaceans"]));
+let history = load("history2", []);
+
+/* ---------- Watch list UI ---------- */
+function renderChips(){
+  const box = $("chips"); box.textContent = "";
+  ALLERGENS.forEach(a => {
+    const lab = document.createElement("label"); lab.className = "chip";
+    const cb = document.createElement("input"); cb.type = "checkbox"; cb.id = "w-" + a.id; cb.checked = watch.has(a.id);
+    cb.addEventListener("change", () => {
+      cb.checked ? watch.add(a.id) : watch.delete(a.id);
+      save("watch2", [...watch]); renderWatchSummary();
+      if (current) renderResult(current);
+    });
+    lab.append(cb, document.createTextNode(a.label));
+    box.append(lab);
+  });
+  renderWatchSummary();
+}
+function renderWatchSummary(){
+  const names = ALLERGENS.filter(a => watch.has(a.id)).map(a => a.label);
+  const txt = names.length ? names.join(", ") : "Nothing selected. Tap Edit to choose allergens.";
+  $("watchSummary").textContent = txt;
+  $("watchPanel").querySelector("summary span").innerHTML = "";
+  const eb = document.createElement("span"); eb.className = "eyebrow"; eb.textContent = "Watching for ";
+  const strong = document.createElement("strong"); strong.style.textTransform = "none"; strong.style.letterSpacing = "0"; strong.style.color = "var(--fg)"; strong.style.fontSize = "1rem";
+  strong.textContent = names.length > 4 ? names.length + " allergens" : (names.length ? names.join(", ") : "nothing yet");
+  $("watchPanel").querySelector("summary span").append(eb, strong);
+}
+
+/* ---------- Scanning ---------- */
+const FORMATS = ["ean_13","ean_8","upc_a","upc_e","code_128","code_39","itf"];
+let stream = null, scanning = false, zxingControls = null, rafId = 0;
+
+function setStatus(msg, isErr){ const s = $("scanStatus"); s.textContent = msg || ""; s.className = "status" + (isErr ? " err" : ""); }
+
+async function startScan(){
+  if (scanning) return;
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+    setStatus("This browser can't open the camera here. Type the barcode number below instead.", true); return;
+  }
+  setStatus("Starting camera…");
+  try{
+    stream = await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:"environment"}, width:{ideal:1280}, height:{ideal:720}}, audio:false});
+  }catch(e){
+    setStatus(e && e.name === "NotAllowedError" ? "Camera access was blocked. Allow the camera for this site in your browser settings, or type the number below." : "Couldn't open the camera. Type the barcode number below instead.", true);
+    return;
+  }
+  const video = $("video");
+  video.srcObject = stream; $("viewfinder").hidden = false; $("stopBtn").hidden = false; $("scanBtn").hidden = true;
+  await video.play().catch(()=>{});
+  scanning = true;
+  setStatus("Point the camera at the barcode and hold steady.");
+
+  let native = null;
+  if ("BarcodeDetector" in window){
+    try{
+      const supported = await BarcodeDetector.getSupportedFormats();
+      const use = FORMATS.filter(f => supported.includes(f));
+      if (use.length) native = new BarcodeDetector({formats: use});
+    }catch(e){ native = null; }
+  }
+  if (native){
+    const tick = async () => {
+      if (!scanning) return;
+      try{
+        if (video.readyState >= 2){
+          const codes = await native.detect(video);
+          const hit = codes.find(c => /^\d{6,14}$/.test(c.rawValue));
+          if (hit){ onCode(hit.rawValue); return; }
+        }
+      }catch(e){}
+      rafId = setTimeout(tick, 150);
+    };
+    tick();
+  } else {
+    try{
+      await loadZXing();
+      const hints = new Map();
+      const reader = new ZXingBrowser.BrowserMultiFormatReader(hints, {delayBetweenScanAttempts:120});
+      zxingControls = await reader.decodeFromVideoElement(video, (res) => {
+        if (res && scanning){ const t = res.getText(); if (/^\d{6,14}$/.test(t)) onCode(t); }
+      });
+    }catch(e){
+      setStatus("Barcode reading isn't available in this browser. Type the number below instead.", true);
+    }
+  }
+}
+function loadZXing(){
+  if (window.ZXingBrowser) return Promise.resolve();
+  return new Promise((res, rej) => {
+    const s = document.createElement("script");
+    s.src = "https://unpkg.com/@zxing/browser@0.1.5/umd/zxing-browser.min.js";
+    s.onload = res; s.onerror = rej; document.head.append(s);
+  });
+}
+function stopScan(){
+  scanning = false; clearTimeout(rafId);
+  if (zxingControls){ try{ zxingControls.stop(); }catch(e){} zxingControls = null; }
+  if (stream){ stream.getTracks().forEach(t => t.stop()); stream = null; }
+  $("viewfinder").hidden = true; $("stopBtn").hidden = true; $("scanBtn").hidden = false;
+}
+function onCode(code){
+  stopScan();
+  if (navigator.vibrate) { try{ navigator.vibrate(60); }catch(e){} }
+  setStatus("Found " + code);
+  $("codeInput").value = code;
+  lookup(code);
+}
+
+/* ---------- Lookup ---------- */
+const FIELDS = "code,product_name,product_name_en,generic_name,brands,quantity,image_front_small_url,allergens_tags,traces_tags,ingredients_text,ingredients_text_en,labels_tags,ingredients_tags,lang";
+let current = null;
+
+async function lookup(raw){
+  const code = String(raw).replace(/\D/g, "");
+  if (code.length < 6){ setStatus("That doesn't look like a barcode. Most have 8, 12 or 13 digits.", true); return; }
+  const res = $("result"); res.textContent = "";
+  const p = document.createElement("div"); p.className = "panel"; p.innerHTML = '<p class="status"><span class="spinner"></span>Looking up ' + code + '…</p>';
+  res.append(p);
+  let data = null;
+  // Try as typed, then with a leading 0 (UPC-A -> EAN-13), then without one.
+  const tries = [code];
+  if (code.length === 12) tries.push("0" + code);
+  if (code.length === 13 && code[0] === "0") tries.push(code.slice(1));
+  try{
+    for (const c of tries){
+      const r = await fetch("https://world.openfoodfacts.org/api/v2/product/" + c + ".json?fields=" + FIELDS);
+      if (!r.ok && r.status !== 404) throw new Error("HTTP " + r.status);
+      const j = await r.json();
+      if (j && j.status === 1 && j.product){ data = j.product; data.code = data.code || c; break; }
+    }
+  }catch(e){
+    renderError(code, "Couldn't reach Open Food Facts. Check your connection and try again.");
+    return;
+  }
+  if (!data){ renderNotFound(code); return; }
+  current = analyse(data);
+  renderResult(current);
+  remember(current);
+}
+
+/* ---------- Analysis ---------- */
+function analyse(p){
+  const allergenTags = p.allergens_tags || [];
+  const traceTags = p.traces_tags || [];
+  const labels = p.labels_tags || [];
+  const ingredients = (p.ingredients_text_en || p.ingredients_text || "").trim();
+  const contains = new Set(), traces = new Set(), otherContains = [], otherTraces = [];
+  allergenTags.forEach(t => TAG_TO_ALLERGEN[t] ? contains.add(TAG_TO_ALLERGEN[t]) : otherContains.push(t));
+  traceTags.forEach(t => TAG_TO_ALLERGEN[t] ? traces.add(TAG_TO_ALLERGEN[t]) : otherTraces.push(t));
+  // Drop "gluten-free ..." phrases (e.g. "gluten-free oats", "gluten free") before looking for gluten words.
+  const lower = ingredients.toLowerCase().replace(/gluten[- ]?free(\s+[a-z']+)?/g, " ");
+  const glutenWords = GLUTEN_WORDS.filter(w => new RegExp("\\b" + w.replace(/'/g, "'?") + "\\b", "i").test(lower));
+  const gfLabel = labels.some(l => GLUTEN_FREE_LABELS.includes(l));
+  const hasData = allergenTags.length > 0 || traceTags.length > 0 || ingredients.length > 0;
+  return {
+    code: p.code, name: p.product_name_en || p.product_name || p.generic_name || "Unnamed product",
+    brand: (p.brands || "").split(",")[0].trim(), quantity: p.quantity || "", image: p.image_front_small_url || "",
+    contains, traces, otherContains, otherTraces, ingredients, glutenWords, gfLabel, hasData,
+    hasAllergenInfo: allergenTags.length > 0 || traceTags.length > 0
+  };
+}
+
+function glutenVerdict(a){
+  if (a.contains.has("gluten")) return {cls:"v-bad", big:"Contains gluten", why:"Listed as an allergen on this product."};
+  if (a.glutenWords.length && !a.gfLabel) return {cls:"v-bad", big:"Likely contains gluten", why:"The ingredients mention " + a.glutenWords.join(", ") + "."};
+  if (a.traces.has("gluten")) return {cls:"v-warn", big:"May contain gluten", why:"Listed as a possible trace or cross-contact."};
+  if (a.gfLabel && a.glutenWords.length) return {cls:"v-warn", big:"Labelled gluten-free, check oats", why:"Labelled gluten-free, but the ingredients mention " + a.glutenWords.join(", ") + "."};
+  if (a.gfLabel) return {cls:"v-good", big:"Labelled gluten-free", why:"The package carries a gluten-free label."};
+  if (!a.hasData) return {cls:"v-unk", big:"No ingredient data", why:"Open Food Facts has this product but no ingredients or allergens yet."};
+  return {cls:"v-good", big:"No gluten listed", why:"No gluten in the allergens or ingredients we have. It is not labelled gluten-free, so cross-contact is possible."};
+}
+
+function overallVerdict(a){
+  const watched = [...watch];
+  const hit = watched.filter(id => a.contains.has(id) || (id === "gluten" && a.glutenWords.length && !a.gfLabel));
+  const maybe = watched.filter(id => !hit.includes(id) && a.traces.has(id));
+  if (!watched.length) return null;
+  if (hit.length) return {cls:"v-bad", big:"Contains " + hit.map(id => LABEL[id]).join(", "), why:maybe.length ? "Also may contain " + maybe.map(id => LABEL[id]).join(", ") + "." : ""};
+  if (maybe.length) return {cls:"v-warn", big:"May contain " + maybe.map(id => LABEL[id]).join(", "), why:"Listed as possible traces or cross-contact."};
+  if (!a.hasData) return {cls:"v-unk", big:"Can't tell", why:"This product has no ingredient or allergen data yet."};
+  if (!a.hasAllergenInfo) return {cls:"v-unk", big:"None of yours found in the ingredients", why:"No allergen list is recorded, so read the ingredients below and the package."};
+  return {cls:"v-good", big:"None of your allergens listed", why:"Based on the allergens and traces recorded for this product."};
+}
+
+/* ---------- Rendering ---------- */
+function el(tag, cls, text){ const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
+function allergenStatus(a, id){
+  if (!a.hasData) return {cls:"v-unk", word:"No data"};
+  if (id === "gluten"){
+    const g = glutenVerdict(a);
+    if (g.cls === "v-bad") return {cls:"v-bad", word: a.contains.has("gluten") ? "Contains" : "Likely"};
+    if (g.cls === "v-warn") return {cls:"v-warn", word: a.traces.has("gluten") ? "May contain" : "Check oats"};
+    if (g.cls === "v-good") return {cls:"v-good", word: a.gfLabel ? "Gluten-free label" : "Not listed"};
+    return {cls:"v-unk", word:"No data"};
+  }
+  if (a.contains.has(id)) return {cls:"v-bad", word:"Contains"};
+  if (a.traces.has(id)) return {cls:"v-warn", word:"May contain"};
+  return {cls:"v-good", word:"Not listed"};
+}
+const RANK = {"v-bad":0, "v-warn":1, "v-unk":2, "v-good":3};
+function overall(a){
+  const ids = ALLERGENS.map(x => x.id).filter(id => watch.has(id));
+  if (!ids.length) return {cls:"v-unk", big:"Pick your allergens", why:"Tap Edit under Watching for to choose what to check."};
+  const st = ids.map(id => [id, allergenStatus(a, id)]);
+  const bad = st.filter(x => x[1].cls === "v-bad").map(x => LABEL[x[0]]);
+  const warn = st.filter(x => x[1].cls === "v-warn").map(x => LABEL[x[0]]);
+  if (bad.length) return {cls:"v-bad", big:"Contains " + bad.join(", "), why: warn.length ? "Also may contain " + warn.join(", ") + "." : ""};
+  if (warn.length) return {cls:"v-warn", big:"May contain " + warn.join(", "), why: (watch.has("gluten") && !a.traces.has("gluten") && allergenStatus(a, "gluten").cls === "v-warn") ? "Labelled gluten-free but contains oats, which some people with coeliac disease react to." : "Possible traces or cross-contact."};
+  if (st.every(x => x[1].cls === "v-unk")) return {cls:"v-unk", big:"Can't tell", why:"There's no ingredient or allergen information to check."};
+  return {cls:"v-good", big:"None of your allergens found", why:"Checked " + ids.length + " allergen" + (ids.length > 1 ? "s" : "") + ". Still read the package if you're unsure."};
+}
+function allergenGrid(a){
+  const grid = el("div", "grid");
+  ALLERGENS.filter(x => watch.has(x.id)).map(x => [x, allergenStatus(a, x.id)])
+    .sort((p, q) => RANK[p[1].cls] - RANK[q[1].cls])
+    .forEach(([x, st]) => { const t = el("div", "tile " + st.cls); t.append(el("span", "n", x.label), el("span", "w", st.word)); grid.append(t); });
+  return grid;
+}
+function verdictBox(v, eyebrow){
+  const box = el("div", "verdict " + v.cls);
+  if (eyebrow) box.append(el("div", "eyebrow", eyebrow));
+  box.append(el("div", "big", v.big));
+  if (v.why) box.append(el("p", null, v.why));
+  return box;
+}
+function prettyTag(t){ const s = t.replace(/^[a-z]{2}:/, "").replace(/-/g, " "); return s.charAt(0).toUpperCase() + s.slice(1); }
+
+function tagList(ids, others, hitClass){
+  const wrap = el("div", "tags");
+  const items = [...ids].map(id => ({label: LABEL[id], hit: watch.has(id)}))
+    .concat(others.map(t => ({label: prettyTag(t), hit: false})));
+  if (!items.length) return null;
+  items.sort((x, y) => (y.hit - x.hit));
+  items.forEach(i => wrap.append(el("span", "tag" + (i.hit ? " " + hitClass : ""), i.label)));
+  return wrap;
+}
+
+function renderResult(a){
+  const res = $("result"); res.textContent = "";
+  const panel = el("div", "panel");
+
+  const prod = el("div", "product");
+  if (a.image && /^https:\/\//.test(a.image)){ const img = el("img"); img.src = a.image; img.alt = ""; img.loading = "lazy"; prod.append(img); }
+  const meta = el("div", "meta");
+  meta.append(el("h2", null, a.name));
+  const sub = [a.brand, a.quantity].filter(Boolean).join(" · ");
+  if (sub) meta.append(el("p", null, sub));
+  meta.append(el("p", "code", "Barcode " + a.code));
+  prod.append(meta);
+  panel.append(prod);
+
+  panel.append(verdictBox(overall(a)));
+  if (watch.size) panel.append(allergenGrid(a));
+
+  const sec1 = el("div"); sec1.append(el("div", "eyebrow", "Contains"));
+  const t1 = tagList(a.contains, a.otherContains, "hit");
+  sec1.append(t1 || el("p", "none", a.hasAllergenInfo ? "No allergens listed." : "No allergen list recorded."));
+  sec1.style.display = "flex"; sec1.style.flexDirection = "column"; sec1.style.gap = "6px";
+  panel.append(sec1);
+
+  const sec2 = el("div"); sec2.append(el("div", "eyebrow", "May contain (traces)"));
+  const t2 = tagList(a.traces, a.otherTraces, "hit-warn");
+  sec2.append(t2 || el("p", "none", "No traces listed."));
+  sec2.style.display = "flex"; sec2.style.flexDirection = "column"; sec2.style.gap = "6px";
+  panel.append(sec2);
+
+  const sec3 = el("div"); sec3.append(el("div", "eyebrow", "Ingredients"));
+  sec3.style.display = "flex"; sec3.style.flexDirection = "column"; sec3.style.gap = "6px";
+  if (a.ingredients){
+    const p = el("p", "ingredients");
+    const words = a.glutenWords.length ? a.glutenWords : [];
+    if (words.length && watch.has("gluten")){
+      const re = new RegExp("\\b(" + words.map(w => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|") + ")\\b", "gi");
+      let last = 0, m;
+      while ((m = re.exec(a.ingredients))){ p.append(document.createTextNode(a.ingredients.slice(last, m.index))); p.append(el("mark", null, m[0])); last = m.index + m[0].length; }
+      p.append(document.createTextNode(a.ingredients.slice(last)));
+    } else p.textContent = a.ingredients;
+    sec3.append(p);
+  } else sec3.append(el("p", "none", "No ingredient list recorded."));
+  panel.append(sec3);
+
+  if (!a.hasAllergenInfo || !a.ingredients){
+    const n = el("p", "note");
+    n.append(document.createTextNode("Some data is missing for this product, so check the package label. You can help by adding it on "));
+    const link = el("a", null, "Open Food Facts"); link.href = "https://world.openfoodfacts.org/product/" + encodeURIComponent(a.code); link.target = "_blank"; link.rel = "noopener";
+    n.append(link, document.createTextNode("."));
+    panel.append(n);
+  }
+
+  const more = el("p", "hint");
+  const l2 = el("a", null, "View this product on Open Food Facts"); l2.href = "https://world.openfoodfacts.org/product/" + encodeURIComponent(a.code); l2.target = "_blank"; l2.rel = "noopener";
+  more.append(l2); panel.append(more);
+
+  res.append(panel);
+  res.scrollIntoView({behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start"});
+}
+
+function renderNotFound(code){
+  const res = $("result"); res.textContent = "";
+  const panel = el("div", "panel");
+  panel.append(verdictBox({cls:"v-unk", big:"Product not found", why:"Open Food Facts has no product with barcode " + code + "."}));
+  const n = el("p", "note");
+  n.append(document.createTextNode("Check the number and try again, or read the package label. Anyone can add a product with the Open Food Facts app or at "));
+  const a = el("a", null, "openfoodfacts.org"); a.href = "https://world.openfoodfacts.org/"; a.target = "_blank"; a.rel = "noopener";
+  n.append(a, document.createTextNode("."));
+  panel.append(n); res.append(panel);
+}
+function renderError(code, msg){
+  const res = $("result"); res.textContent = "";
+  const panel = el("div", "panel");
+  panel.append(el("p", "status err", msg));
+  const b = el("button", null, "Try again"); b.type = "button"; b.addEventListener("click", () => lookup(code));
+  panel.append(b); res.append(panel);
+}
+
+/* ---------- History ---------- */
+function remember(a){
+  const v = overall(a);
+  history = history.filter(h => h.code !== a.code);
+  history.unshift({code: a.code, name: a.name, brand: a.brand, cls: v.cls, big: v.big});
+  history = history.slice(0, 12); save("history2", history); renderHistory();
+}
+function renderHistory(){
+  const box = $("history"); box.textContent = "";
+  $("historyPanel").hidden = history.length === 0;
+  history.forEach(h => {
+    const b = el("button"); b.type = "button";
+    b.append(el("span", "h-name", h.name + (h.brand ? " · " + h.brand : "")));
+    const short = {"v-bad":"Contains", "v-warn":"Maybe", "v-good":"Clear", "v-unk":"Unknown"}[h.cls] || "";
+    b.append(el("span", "dot " + h.cls, short));
+    b.addEventListener("click", () => { $("codeInput").value = h.code; lookup(h.code); });
+    box.append(b);
+  });
+}
+
+/* ---------- Wire up ---------- */
+$("scanBtn").addEventListener("click", startScan);
+$("stopBtn").addEventListener("click", () => { stopScan(); setStatus(""); });
+$("manualForm").addEventListener("submit", (e) => { e.preventDefault(); stopScan(); lookup($("codeInput").value); });
+document.addEventListener("visibilitychange", () => { if (document.hidden) stopScan(); });
+renderChips(); renderHistory();
+const q = new URLSearchParams(location.search).get("code");
+if (q) { $("codeInput").value = q; lookup(q); }
+})();
+</script>
+</body>
+</html>
