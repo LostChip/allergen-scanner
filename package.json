@@ -1,0 +1,29 @@
+{
+  "name": "allergen-scanner",
+  "version": "1.0.0",
+  "description": "Scan a barcode and see its allergens",
+  "scripts": {
+    "build": "node scripts/build-www.mjs",
+    "ios": "npm run build && npx cap sync ios && npx cap open ios",
+    "sync": "npm run build && npx cap sync ios"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lostchip/allergen-scanner.git"
+  },
+  "license": "UNLICENSED",
+  "bugs": {
+    "url": "https://github.com/lostchip/allergen-scanner/issues"
+  },
+  "homepage": "https://github.com/lostchip/allergen-scanner#readme",
+  "dependencies": {
+    "@capacitor/barcode-scanner": "^3.1.4",
+    "@capacitor/core": "^8.6.2",
+    "@capacitor/haptics": "^8.0.2",
+    "@capacitor/ios": "^8.6.2"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^8.6.2"
+  },
+  "private": true
+}

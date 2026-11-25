@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#147a63"/><stop offset="1" stop-color="#0b4539"/></linearGradient></defs>
+  <rect width="1024" height="1024" fill="url(#g)"/>
+  <!-- card -->
+  <rect x="212" y="232" width="600" height="560" rx="72" fill="#f5f7f6"/>
+  <!-- barcode -->
+  <g fill="#14201c">
+    <rect x="292" y="312" width="22" height="260"/><rect x="334" y="312" width="12" height="260"/>
+    <rect x="366" y="312" width="32" height="260"/><rect x="418" y="312" width="12" height="260"/>
+    <rect x="450" y="312" width="22" height="260"/><rect x="492" y="312" width="40" height="260"/>
+    <rect x="552" y="312" width="12" height="260"/><rect x="584" y="312" width="22" height="260"/>
+    <rect x="626" y="312" width="12" height="260"/><rect x="658" y="312" width="32" height="260"/>
+    <rect x="710" y="312" width="22" height="260"/>
+  </g>
+  <!-- verdict badge -->
+  <circle cx="512" cy="660" r="96" fill="#1d6b34" stroke="#f5f7f6" stroke-width="20"/>
+  <path d="M462 662 l34 34 l70 -74" fill="none" stroke="#ffffff" stroke-width="30" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
