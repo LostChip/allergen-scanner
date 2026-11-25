@@ -109,6 +109,7 @@ footer{color:var(--muted);font-size:.8rem;text-align:center}
 .source{font-size:.8rem !important}
 a.fallback{display:block;text-align:center;background:var(--accent);color:var(--accent-fg);border-radius:10px;padding:12px;font-weight:700;text-decoration:none}
 #sourcesPanel summary::after{content:"More"} #sourcesPanel[open] summary::after{content:"Close"}
+.tile .by,.by{font-size:.75rem;color:var(--muted)}
 </style>
 </head>
 <body>
@@ -149,8 +150,8 @@ a.fallback{display:block;text-align:center;background:var(--accent);color:var(--
 
   <details class="panel" id="sourcesPanel">
     <summary><span><span class="eyebrow">Data sources</span></span></summary>
-    <p class="hint">Each barcode is checked on Open Food Facts first. If it isn't there, or has no ingredients, the app checks USDA FoodData Central, which covers most US packaged foods, and reads the allergens from its ingredient list.</p>
-    <p class="hint">USDA lookups use a shared demo key that allows about 30 lookups an hour. For more, get a free key at <a href="https://fdc.nal.usda.gov/api-key-signup" target="_blank" rel="noopener">fdc.nal.usda.gov</a> and paste it here. It stays on this device.</p>
+    <p class="hint">Every barcode is checked on Open Food Facts and USDA FoodData Central at the same time. Allergens from both are combined, so if either one flags an allergen, you see it. USDA covers most US packaged foods; its allergens are read from the ingredient list.</p>
+    <p class="hint">USDA lookups use a shared demo key that allows about 30 lookups an hour, and every scan uses one or two. For more, get a free key at <a href="https://fdc.nal.usda.gov/api-key-signup" target="_blank" rel="noopener">fdc.nal.usda.gov</a> and paste it here. It stays on this device.</p>
     <form class="manual" id="keyForm" autocomplete="off">
       <label for="usdaKey" hidden>USDA API key</label>
       <input id="usdaKey" placeholder="USDA API key (optional)" spellcheck="false">
@@ -358,44 +359,37 @@ async function lookup(raw){
   const res = $("result"); res.textContent = "";
   const p = document.createElement("div"); p.className = "panel"; p.innerHTML = '<p class="status"><span class="spinner"></span>Looking up ' + code + '…</p>';
   res.append(p);
-  let data = null, offFailed = false;
-  // Try as typed, then with a leading 0 (UPC-A -> EAN-13), then without one.
-  const tries = [code];
-  if (code.length === 12) tries.push("0" + code);
-  if (code.length === 13 && code[0] === "0") tries.push(code.slice(1));
-  try{
+  // Ask every database at once, then combine what they say.
+  const offTask = (async () => {
+    // Try as typed, then with a leading 0 (UPC-A -> EAN-13), then without one.
+    const tries = [code];
+    if (code.length === 12) tries.push("0" + code);
+    if (code.length === 13 && code[0] === "0") tries.push(code.slice(1));
     for (const c of tries){
       const r = await fetch("https://world.openfoodfacts.org/api/v2/product/" + c + ".json?fields=" + FIELDS);
       if (!r.ok && r.status !== 404) throw new Error("HTTP " + r.status);
       const j = await r.json();
-      if (j && j.status === 1 && j.product){ data = j.product; data.code = data.code || c; break; }
+      if (j && j.status === 1 && j.product){ const d = j.product; d.code = d.code || c; return d; }
     }
-  }catch(e){ offFailed = true; }
+    return null;
+  })();
+  const [offRes, usdaRes] = await Promise.allSettled([offTask, usdaLookup(code)]);
+  const off = offRes.status === "fulfilled" ? offRes.value : null;
+  const usda = usdaRes.status === "fulfilled" ? usdaRes.value : null;
+  const offFailed = offRes.status === "rejected";
+  const usdaError = usdaRes.status === "rejected" ? (usdaRes.reason && usdaRes.reason.message === "rate" ? "rate" : "fail") : "";
 
-  const offUseful = data && ((data.allergens_tags || []).length || (data.traces_tags || []).length || (data.ingredients_text_en || data.ingredients_text || "").trim());
-  let usda = null, usdaError = "";
-  if (!offUseful){
-    try{ usda = await usdaLookup(code); }
-    catch(e){ usdaError = e && e.message === "rate" ? "rate" : "fail"; }
-  }
-  if (usda){
-    // Keep Open Food Facts' name and photo when it has them; take ingredients from USDA.
-    const merged = Object.assign({}, data || {}, {
-      code: (data && data.code) || code,
-      product_name: (data && (data.product_name_en || data.product_name)) || usda.name,
-      brands: (data && data.brands) || usda.brand,
-      quantity: (data && data.quantity) || usda.size,
-      ingredients_text: usda.ingredients, ingredients_text_en: usda.ingredients,
-      allergens_tags: [], traces_tags: [], _source: "usda", _offHas: !!data
-    });
-    data = merged;
-  }
-  if (!data){
+  const parts = [];
+  if (off) parts.push(analyse(off));
+  if (usda) parts.push(analyse({code: code, product_name: usda.name, brands: usda.brand, quantity: usda.size,
+    ingredients_text: usda.ingredients, allergens_tags: [], traces_tags: [], _source: "usda"}));
+  if (!parts.length){
     if (offFailed && usdaError === "fail") renderError(code, "Couldn't reach the product databases. Check your connection and try again.");
-    else renderNotFound(code, usdaError);
+    else renderNotFound(code, usdaError, offFailed);
     return;
   }
-  current = analyse(data);
+  const data = mergeAnalyses(parts, {offFailed, usdaError});
+  current = data;
   renderResult(current);
   remember(current);
 }
@@ -439,7 +433,8 @@ function analyse(p){
   allergenTags.forEach(t => TAG_TO_ALLERGEN[t] ? contains.add(TAG_TO_ALLERGEN[t]) : otherContains.push(t));
   traceTags.forEach(t => TAG_TO_ALLERGEN[t] ? traces.add(TAG_TO_ALLERGEN[t]) : otherTraces.push(t));
   // Drop "gluten-free ..." phrases (e.g. "gluten-free oats", "gluten free") before looking for gluten words.
-  const lower = ingredients.toLowerCase().replace(/gluten[- ]?free(\s+[a-z']+)?/g, " ");
+  // Only the main ingredients count here; "may contain" statements are handled as traces.
+  const lower = textAllergens(ingredients.toLowerCase().replace(/gluten[- ]?free(\s+[a-z']+)?/g, " ")).mainPart;
   const glutenWords = GLUTEN_WORDS.filter(w => new RegExp("\\b" + w.replace(/'/g, "'?") + "\\b", "i").test(lower));
   const gfLabel = labels.some(l => GLUTEN_FREE_LABELS.includes(l));
   const hasData = allergenTags.length > 0 || traceTags.length > 0 || ingredients.length > 0;
@@ -465,7 +460,7 @@ function glutenVerdict(a){
   if (a.traces.has("gluten")) return {cls:"v-warn", big:"May contain gluten", why:"Listed as a possible trace or cross-contact."};
   if (a.gfLabel && a.glutenWords.length) return {cls:"v-warn", big:"Labelled gluten-free, check oats", why:"Labelled gluten-free, but the ingredients mention " + a.glutenWords.join(", ") + "."};
   if (a.gfLabel) return {cls:"v-good", big:"Labelled gluten-free", why:"The package carries a gluten-free label."};
-  if (!a.hasData) return {cls:"v-unk", big:"No ingredient data", why:"Open Food Facts has this product but no ingredients or allergens yet."};
+  if (!a.hasData) return {cls:"v-unk", big:"No ingredient data", why:"The databases have this product but no ingredients or allergens yet."};
   return {cls:"v-good", big:"No gluten listed", why:"No gluten in the allergens or ingredients we have. It is not labelled gluten-free, so cross-contact is possible."};
 }
 
@@ -479,6 +474,38 @@ function overallVerdict(a){
   if (!a.hasData) return {cls:"v-unk", big:"Can't tell", why:"This product has no ingredient or allergen data yet."};
   if (!a.hasAllergenInfo) return {cls:"v-unk", big:"None of yours found in the ingredients", why:"No allergen list is recorded, so read the ingredients below and the package."};
   return {cls:"v-good", big:"None of your allergens listed", why:"Based on the allergens and traces recorded for this product."};
+}
+
+const SHORT = {"Open Food Facts":"Open Food Facts", "USDA FoodData Central":"USDA"};
+function mergeAnalyses(parts, status){
+  const first = parts[0];
+  const withName = parts.find(x => x.name && x.name !== "Unnamed product") || first;
+  const m = {
+    code: first.code, name: withName.name, brand: parts.map(x => x.brand).find(Boolean) || "",
+    quantity: parts.map(x => x.quantity).find(Boolean) || "", image: parts.map(x => x.image).find(Boolean) || "",
+    contains: new Set(), traces: new Set(), otherContains: [], otherTraces: [],
+    glutenWords: [...new Set(parts.flatMap(x => x.glutenWords))],
+    gfLabel: parts.some(x => x.gfLabel), hasData: parts.some(x => x.hasData), hasAllergenInfo: parts.some(x => x.hasAllergenInfo),
+    ingredients: (parts.find(x => x.ingredients) || first).ingredients,
+    ingredientSets: parts.filter(x => x.ingredients).map(x => ({src: x.source, text: x.ingredients})),
+    sources: parts.map(x => x.source), offHas: parts.some(x => x.source === "Open Food Facts"),
+    byId: {}, disagree: [], status: status || {}
+  };
+  parts.forEach(x => {
+    x.contains.forEach(id => m.contains.add(id));
+    x.traces.forEach(id => m.traces.add(id));
+    m.otherContains.push(...x.otherContains.filter(t => !m.otherContains.includes(t)));
+    m.otherTraces.push(...x.otherTraces.filter(t => !m.otherTraces.includes(t)));
+  });
+  m.contains.forEach(id => m.traces.delete(id));
+  // Which source said what, and where sources that have data disagree.
+  ALLERGENS.forEach(({id}) => {
+    const said = parts.map(x => ({src: SHORT[x.source] || x.source, has: x.hasData, v: x.contains.has(id) ? "c" : x.traces.has(id) ? "t" : ""}));
+    m.byId[id] = said.filter(s => s.v).map(s => s.src);
+    const withData = said.filter(s => s.has);
+    if (withData.length > 1 && new Set(withData.map(s => s.v)).size > 1) m.disagree.push(id);
+  });
+  return m;
 }
 
 /* ---------- Rendering ---------- */
@@ -512,7 +539,13 @@ function allergenGrid(a){
   const grid = el("div", "grid");
   ALLERGENS.filter(x => watch.has(x.id)).map(x => [x, allergenStatus(a, x.id)])
     .sort((p, q) => RANK[p[1].cls] - RANK[q[1].cls])
-    .forEach(([x, st]) => { const t = el("div", "tile " + st.cls); t.append(el("span", "n", x.label), el("span", "w", st.word)); grid.append(t); });
+    .forEach(([x, st]) => {
+      const t = el("div", "tile " + st.cls); t.append(el("span", "n", x.label), el("span", "w", st.word));
+      const by = (a.byId && a.byId[x.id]) || [];
+      if (by.length && (a.sources || []).length > 1) t.append(el("span", "by", "via " + by.join(" + ")));
+      if (a.disagree && a.disagree.includes(x.id)) t.append(el("span", "by", "Sources disagree"));
+      grid.append(t);
+    });
   return grid;
 }
 function verdictBox(v, eyebrow){
@@ -545,12 +578,19 @@ function renderResult(a){
   const sub = [a.brand, a.quantity].filter(Boolean).join(" · ");
   if (sub) meta.append(el("p", null, sub));
   meta.append(el("p", "code", "Barcode " + a.code));
-  meta.append(el("p", "source", "Source: " + a.source + (a.source !== "Open Food Facts" ? " (allergens read from the ingredients)" : "")));
+  const srcs = a.sources || [a.source];
+  let srcLine = "Checked: " + srcs.join(" and ");
+  if (a.status && a.status.usdaError === "rate") srcLine += ". USDA skipped (hourly limit reached)";
+  else if (a.status && a.status.usdaError) srcLine += ". USDA couldn't be reached";
+  if (a.status && a.status.offFailed) srcLine += ". Open Food Facts couldn't be reached";
+  meta.append(el("p", "source", srcLine + "."));
   prod.append(meta);
   panel.append(prod);
 
   panel.append(verdictBox(overall(a)));
   if (watch.size) panel.append(allergenGrid(a));
+  const dis = (a.disagree || []).filter(id => watch.has(id));
+  if (dis.length) panel.append(el("p", "note", "The databases disagree about " + dis.map(id => LABEL[id]).join(", ") + ". The safer answer is shown, so check the package to be sure."));
 
   const sec1 = el("div"); sec1.append(el("div", "eyebrow", "Contains"));
   const t1 = tagList(a.contains, a.otherContains, "hit");
@@ -566,16 +606,20 @@ function renderResult(a){
 
   const sec3 = el("div"); sec3.append(el("div", "eyebrow", "Ingredients"));
   sec3.style.display = "flex"; sec3.style.flexDirection = "column"; sec3.style.gap = "6px";
-  if (a.ingredients){
-    const p = el("p", "ingredients");
-    const words = a.glutenWords.length ? a.glutenWords : [];
-    if (words.length && watch.has("gluten")){
-      const re = new RegExp("\\b(" + words.map(w => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|") + ")\\b", "gi");
-      let last = 0, m;
-      while ((m = re.exec(a.ingredients))){ p.append(document.createTextNode(a.ingredients.slice(last, m.index))); p.append(el("mark", null, m[0])); last = m.index + m[0].length; }
-      p.append(document.createTextNode(a.ingredients.slice(last)));
-    } else p.textContent = a.ingredients;
-    sec3.append(p);
+  const sets = a.ingredientSets || (a.ingredients ? [{src: "", text: a.ingredients}] : []);
+  if (sets.length){
+    sets.forEach(set => {
+      if (sets.length > 1) sec3.append(el("div", "by", "From " + (SHORT[set.src] || set.src)));
+      const p = el("p", "ingredients");
+      const words = a.glutenWords.length ? a.glutenWords : [];
+      if (words.length && watch.has("gluten")){
+        const re = new RegExp("\\b(" + words.map(w => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|") + ")\\b", "gi");
+        let last = 0, mm;
+        while ((mm = re.exec(set.text))){ p.append(document.createTextNode(set.text.slice(last, mm.index))); p.append(el("mark", null, mm[0])); last = mm.index + mm[0].length; }
+        p.append(document.createTextNode(set.text.slice(last)));
+      } else p.textContent = set.text;
+      sec3.append(p);
+    });
   } else sec3.append(el("p", "none", "No ingredient list recorded."));
   panel.append(sec3);
 
@@ -602,10 +646,10 @@ function labelCheckLink(){
   a.href = LABEL_CHECK_URL; a.target = "_blank"; a.rel = "noopener";
   return a;
 }
-function renderNotFound(code, usdaError){
+function renderNotFound(code, usdaError, offFailed){
   const res = $("result"); res.textContent = "";
   const panel = el("div", "panel");
-  const checked = usdaError ? "Open Food Facts has no product with barcode " + code + "." : "Neither Open Food Facts nor USDA FoodData Central has barcode " + code + ".";
+  const checked = usdaError ? "Open Food Facts has no product with barcode " + code + "." : offFailed ? "USDA FoodData Central has no product with barcode " + code + ", and Open Food Facts couldn't be reached." : "Neither Open Food Facts nor USDA FoodData Central has barcode " + code + ".";
   panel.append(verdictBox({cls:"v-unk", big:"Product not found", why: checked}));
   if (usdaError === "rate"){
     const w = el("p", "note");
