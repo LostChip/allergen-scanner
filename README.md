@@ -6,4 +6,4 @@ A phone-friendly page that scans a product barcode with the camera, looks it up 
 - Type the barcode if the camera can't read it.
 - Recent scans are kept on your device.
 
-Data comes from Open Food Facts and can be incomplete. Always check the package label.
+Data comes from Open Food Facts and USDA and can be incomplete. Always check the package label.
